@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Prova</title>
+<style>
+  :root { --sfondo: #1c1014; --testo: #fff; --accento: #c9a24d; }
+  html { background: var(--sfondo); }
+  body { margin: 0; height: 100%; color: var(--testo);
+    font-family: Georgia, "Times New Roman", serif; overflow: hidden; }
+  #inizio { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 24px; padding: 24px; text-align: center;
+    background: var(--sfondo); }
+  #inizio p { margin: 0; font-size: 20px; line-height: 1.4; max-width: 320px; }
+  html { height: 100%; overflow: hidden; }
+  button { font: inherit; font-size: 20px; color: #1c1014; background: var(--accento); border: 0;
+    border-radius: 999px; padding: 14px 40px; }
+  button:disabled { opacity: .6; }
+  #guida { position: fixed; left: 16px; right: 16px; bottom: calc(44px + env(safe-area-inset-bottom));
+    z-index: 10; text-align: center; font-size: 18px; pointer-events: none; }
+  #guida span { background: rgba(0,0,0,.65); padding: 8px 16px; border-radius: 999px; }
+  #stato { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 10; text-align: center; font: 11px/1.3 monospace; color: #fff; text-shadow: 0 0 3px #000; pointer-events: none; }
+  .nascosto { display: none !important; }
+</style>
+<script src="../lib/aframe.js"></script>
+<script src="../lib/mindar-image-aframe.js"></script>
+</head>
+<body>
+<div id="inizio">
+  <p>Tocca «Inizia», consenti la fotocamera e inquadra la foto da 20-25 cm.</p>
+  <button id="via" disabled>Attendi…</button>
+</div>
+<div id="guida" class="nascosto"><span>Inquadra tutta la foto</span></div>
+<div id="stato"></div>
+
+<a-scene id="scena"
+  mindar-image="imageTargetSrc: foto.mind; autoStart: false; uiLoading: no; uiScanning: no; uiError: no; filterMinCF: 0.001; filterBeta: 0.01; warmupTolerance: 3; missTolerance: 10"
+  color-space="sRGB" renderer="colorManagement: true; physicallyCorrectLights: false"
+  vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
+  <a-assets timeout="8000">
+    <video id="video" src="video.mp4" preload="auto" loop playsinline webkit-playsinline crossorigin="anonymous"></video>
+  </a-assets>
+  <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+  <a-entity id="bersaglio" mindar-image-target="targetIndex: 0">
+    <!-- La foto è quadrata: per MindAR è larga 1, quindi il video è 1×1 e la copre tutta. -->
+    <a-video src="#video" width="1" height="1" position="0 0 0" material="shader: flat"></a-video>
+  </a-entity>
+</a-scene>
+
+<script>
+  const scena = document.getElementById('scena');
+  const video = document.getElementById('video');
+  const bersaglio = document.getElementById('bersaglio');
+  const via = document.getElementById('via');
+  const inizio = document.getElementById('inizio');
+  const guida = document.getElementById('guida');
+  const stato = document.getElementById('stato');
+  const dettagli = { fase: 'carico' };
+  let attesaPausa = null;
+
+  // Riga tecnica in basso: serve solo a capire cosa succede durante la prova.
+  function aggiorna(fase) {
+    if (fase) dettagli.fase = fase;
+    stato.textContent = [dettagli.fase, dettagli.camera].filter(Boolean).join(' · ');
+  }
+
+  scena.addEventListener('renderstart', () => {
+    via.disabled = false;
+    via.textContent = 'Inizia';
+    aggiorna('pronta');
+  });
+
+  via.addEventListener('click', async () => {
+    via.disabled = true;
+    via.textContent = 'Apro la fotocamera…';
+    // Sull'iPhone l'audio parte solo dopo un tocco: lo sblocchiamo qui.
+    try {
+      video.muted = false;
+      await video.play();
+      video.pause();
+      video.currentTime = 0;
+    } catch (e) {
+      aggiorna('audio bloccato: ' + e.name);
+    }
+    aggiorna('apro la fotocamera');
+    scena.systems['mindar-image-system'].start();
+  });
+
+  scena.addEventListener('arReady', () => {
+    inizio.classList.add('nascosto');
+    guida.classList.remove('nascosto');
+    const camera = scena.systems['mindar-image-system'].video;
+    const traccia = camera && camera.srcObject && camera.srcObject.getVideoTracks()[0];
+    if (traccia) {
+      const s = traccia.getSettings();
+      dettagli.camera = (traccia.label || 'fotocamera') + ' ' + s.width + '×' + s.height;
+    }
+    aggiorna('cerco la foto');
+  });
+
+  scena.addEventListener('arError', () => {
+    via.textContent = 'Fotocamera non disponibile';
+    aggiorna('errore: fotocamera non aperta');
+  });
+
+  bersaglio.addEventListener('targetFound', () => {
+    clearTimeout(attesaPausa);
+    guida.classList.add('nascosto');
+    aggiorna('foto trovata');
+    video.play().catch(e => aggiorna('video bloccato: ' + e.name));
+  });
+
+  bersaglio.addEventListener('targetLost', () => {
+    aggiorna('foto persa');
+    guida.classList.remove('nascosto');
+    // Mezzo secondo di tolleranza, così il video non si ferma a ogni scatto.
+    attesaPausa = setTimeout(() => video.pause(), 500);
+  });
+
+  window.addEventListener('error', e => aggiorna('errore: ' + e.message));
+</script>
+</body>
+</html>
